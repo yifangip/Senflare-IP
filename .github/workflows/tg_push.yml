@@ -1,9 +1,9 @@
-name: Telegram Push File (with Change Detection)
+name: Telegram Push File (Enhanced Version)
 
 on:
-  workflow_dispatch:   # 手动触发
+  workflow_dispatch:
   schedule:
-    - cron: "0 */6 * * *"   # 每6小时执行一次（可改）
+    - cron: "0 */6 * * *"   # 每6小时自动执行
 
 jobs:
   push_to_tg:
@@ -16,33 +16,35 @@ jobs:
         run: |
           curl -L -o Senflare-Pro.txt https://raw.githubusercontent.com/yifangip/Senflare-IP/refs/heads/main/Senflare-Pro.txt
 
-      - name: 检查是否有上次的缓存
-        id: check_prev
-        run: |
-          if [ -f .last_version.txt ]; then
-            echo "has_previous=true" >> $GITHUB_OUTPUT
-          else
-            echo "has_previous=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: 比较文件哈希
+      - name: 比较文件是否有更新
         id: compare
         run: |
           NEW_HASH=$(sha256sum Senflare-Pro.txt | awk '{print $1}')
-          echo "新文件哈希: $NEW_HASH"
-
           if [ -f .last_version.txt ]; then
             OLD_HASH=$(cat .last_version.txt)
-            echo "旧文件哈希: $OLD_HASH"
           else
             OLD_HASH=""
           fi
-
           if [ "$NEW_HASH" != "$OLD_HASH" ]; then
             echo "changed=true" >> $GITHUB_OUTPUT
           else
             echo "changed=false" >> $GITHUB_OUTPUT
           fi
+
+      - name: 生成时间戳文件名
+        if: steps.compare.outputs.changed == 'true'
+        id: info
+        run: |
+          TIME_STR=$(date '+%Y-%m-%d_%H-%M')
+          READABLE_TIME=$(date '+%Y-%m-%d %H:%M')
+          NEW_NAME="${TIME_STR}_优选ip.txt"
+          mv Senflare-Pro.txt "$NEW_NAME"
+
+          # 统计IP数量（按行数）
+          COUNT=$(wc -l < "$NEW_NAME" | tr -d ' ')
+          echo "file_name=$NEW_NAME" >> $GITHUB_OUTPUT
+          echo "ip_count=$COUNT" >> $GITHUB_OUTPUT
+          echo "time_text=$READABLE_TIME" >> $GITHUB_OUTPUT
 
       - name: 推送到 Telegram（仅当文件变更时）
         if: steps.compare.outputs.changed == 'true'
@@ -50,16 +52,29 @@ jobs:
           BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: |
-          curl -F document=@Senflare-Pro.txt \
-               -F caption="📦 Senflare-Pro.txt 文件已更新！" \
+          FILE_NAME="${{ steps.info.outputs.file_name }}"
+          IP_COUNT="${{ steps.info.outputs.ip_count }}"
+          TIME_TEXT="${{ steps.info.outputs.time_text }}"
+
+          CAPTION=$(cat <<EOF
+📦 * 优选IP更新通知*
+🕓 更新时间：${TIME_TEXT}
+📊 IP数量：${IP_COUNT} 个
+🧾 文件名：${FILE_NAME}
+EOF
+          )
+
+          curl -F document=@"$FILE_NAME" \
+               -F parse_mode="Markdown" \
+               -F caption="$CAPTION" \
                "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument?chat_id=${CHAT_ID}"
 
-      - name: 保存新文件哈希供下次比对
+      - name: 保存新文件哈希
         if: steps.compare.outputs.changed == 'true'
         run: |
-          sha256sum Senflare-Pro.txt | awk '{print $1}' > .last_version.txt
+          curl -L -s https://raw.githubusercontent.com/yifangip/Senflare-IP/refs/heads/main/Senflare-Pro.txt | sha256sum | awk '{print $1}' > .last_version.txt
 
-      - name: 提交更新到仓库（保存哈希）
+      - name: 提交更新哈希
         if: steps.compare.outputs.changed == 'true'
         run: |
           git config user.name "github-actions[bot]"
