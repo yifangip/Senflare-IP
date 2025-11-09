@@ -1,0 +1,69 @@
+name: Telegram Push File (with Change Detection)
+
+on:
+  workflow_dispatch:   # 手动触发
+  schedule:
+    - cron: "0 */6 * * *"   # 每6小时执行一次（可改）
+
+jobs:
+  push_to_tg:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout 仓库
+        uses: actions/checkout@v4
+
+      - name: 下载最新文件
+        run: |
+          curl -L -o Senflare-Pro.txt https://raw.githubusercontent.com/yifangip/Senflare-IP/refs/heads/main/Senflare-Pro.txt
+
+      - name: 检查是否有上次的缓存
+        id: check_prev
+        run: |
+          if [ -f .last_version.txt ]; then
+            echo "has_previous=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_previous=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 比较文件哈希
+        id: compare
+        run: |
+          NEW_HASH=$(sha256sum Senflare-Pro.txt | awk '{print $1}')
+          echo "新文件哈希: $NEW_HASH"
+
+          if [ -f .last_version.txt ]; then
+            OLD_HASH=$(cat .last_version.txt)
+            echo "旧文件哈希: $OLD_HASH"
+          else
+            OLD_HASH=""
+          fi
+
+          if [ "$NEW_HASH" != "$OLD_HASH" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 推送到 Telegram（仅当文件变更时）
+        if: steps.compare.outputs.changed == 'true'
+        env:
+          BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: |
+          curl -F document=@Senflare-Pro.txt \
+               -F caption="📦 Senflare-Pro.txt 文件已更新！" \
+               "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument?chat_id=${CHAT_ID}"
+
+      - name: 保存新文件哈希供下次比对
+        if: steps.compare.outputs.changed == 'true'
+        run: |
+          sha256sum Senflare-Pro.txt | awk '{print $1}' > .last_version.txt
+
+      - name: 提交更新到仓库（保存哈希）
+        if: steps.compare.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .last_version.txt
+          git commit -m "update last_version.txt (auto)"
+          git push
