@@ -1,23 +1,27 @@
-name: Telegram Push File (Auto & Error Notify)
+name: Telegram Push Senflare IP
 
 on:
-  workflow_dispatch:     # ✅ 可手动运行
+  workflow_dispatch:     # ✅ 手动触发
   schedule:
-    - cron: "0 */8 * * *" # ✅ 每6小时自动运行
+    - cron: "0 */8 * * *" # ✅ 每8小时自动执行（UTC时间，可改）
 
 jobs:
   push_to_tg:
     runs-on: ubuntu-latest
+
     steps:
+      # 1️⃣ 检出仓库
       - name: Checkout 仓库
         uses: actions/checkout@v4
 
-      - name: 下载最新文件
+      # 2️⃣ 下载最新文件
+      - name: 下载 Senflare-Pro.txt
         id: download
         run: |
           set -e
           curl -fL -o Senflare-Pro.txt https://raw.githubusercontent.com/yifangip/Senflare-IP/refs/heads/main/Senflare-Pro.txt
 
+      # 3️⃣ 比较文件哈希判断是否更新
       - name: 比较文件哈希
         id: compare
         run: |
@@ -30,22 +34,26 @@ jobs:
             echo "changed=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: 生成信息
+      # 4️⃣ 生成文件名和统计信息（仅当文件变化时）
+      - name: 生成时间戳文件名 & 统计 IP
         if: steps.compare.outputs.changed == 'true'
         id: info
         run: |
           set -e
-          TIME_STR=$(date '+%Y-%m-%d_%H-%M')
-          READABLE_TIME=$(date '+%Y-%m-%d %H:%M')
+          # 使用北京时间 (UTC+8)
+          TIME_STR=$(date -d "+8 hour" '+%Y-%m-%d_%H-%M')
+          READABLE_TIME=$(date -d "+8 hour" '+%Y-%m-%d %H:%M')
           NEW_NAME="${TIME_STR}_优选ip.txt"
           mv Senflare-Pro.txt "$NEW_NAME"
 
-          COUNT=$(wc -l < "$NEW_NAME" | tr -d ' ')
+          # 统计 IP 数量（按行数）
+          IP_COUNT=$(wc -l < "$NEW_NAME" | tr -d ' ')
           echo "file_name=$NEW_NAME" >> $GITHUB_OUTPUT
-          echo "ip_count=$COUNT" >> $GITHUB_OUTPUT
+          echo "ip_count=$IP_COUNT" >> $GITHUB_OUTPUT
           echo "time_text=$READABLE_TIME" >> $GITHUB_OUTPUT
 
-      - name: 推送更新到 Telegram
+      # 5️⃣ 推送文件到 Telegram
+      - name: 推送到 Telegram
         if: steps.compare.outputs.changed == 'true'
         env:
           BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
@@ -56,7 +64,7 @@ jobs:
           TIME_TEXT="${{ steps.info.outputs.time_text }}"
 
           CAPTION=$(cat <<EOF
-📦 * 优选IP更新通知*
+📦 *Senflare 优选IP更新通知*
 🕓 更新时间：${TIME_TEXT}
 📊 IP数量：${IP_COUNT} 个
 🧾 文件名：${FILE_NAME}
@@ -68,6 +76,7 @@ EOF
                -F caption="$CAPTION" \
                "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument?chat_id=${CHAT_ID}"
 
+      # 6️⃣ 保存新文件哈希
       - name: 保存文件哈希
         if: steps.compare.outputs.changed == 'true'
         run: |
@@ -78,13 +87,14 @@ EOF
           git commit -m "update last_version.txt (auto)" || true
           git push || true
 
-      - name: 发送错误提醒（任何步骤失败都会执行）
-        if: failure()
+      # 7️⃣ 出错自动通知 Telegram
+      - name: 发送错误提醒
+        if: ${{ failure() }}
         env:
           BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: |
           curl -sS -f -X POST \
                -H "Content-Type: application/json" \
-               -d "{\"chat_id\": \"${CHAT_ID}\", \"text\": \"⚠️ Senflare 推送工作流执行失败，请检查日志。\", \"disable_notification\": false}" \
+               -d "{\"chat_id\": \"${CHAT_ID}\", \"text\": \"⚠️ Senflare 推送工作流执行失败，请检查 Actions 日志。\", \"disable_notification\": false}" \
                "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage"
