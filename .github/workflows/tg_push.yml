@@ -30,7 +30,8 @@ jobs:
 
           # Telegram 推送（单行 caption 避免 YAML 报错）
           curl -F document=@"$NEW_NAME" \
-               -F caption="   📦 优选IP更新通知 
+               -F caption="
+               📦 优选IP更新通知 
                🕓 更新时间：$READABLE_TIME 
                📊 IP数量：$IP_COUNT 个 
                🧾 文件名：$NEW_NAME" \
